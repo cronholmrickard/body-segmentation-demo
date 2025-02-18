@@ -98,7 +98,11 @@ export default class BodySegmenter {
       // Load the static background image once.
       if (!this.staticImage) {
         this.staticImage = new Image();
-        this.staticImage.src = '/background.png';
+        // Use PUBLIC_URL if available, otherwise default to '/background.png'
+        this.staticImage.src = process.env.PUBLIC_URL
+          ? process.env.PUBLIC_URL + '/background.png'
+          : '/background.png';
+        console.log('Loading static image from:', this.staticImage.src);
         await new Promise((resolve, reject) => {
           this.staticImage.onload = resolve;
           this.staticImage.onerror = reject;
