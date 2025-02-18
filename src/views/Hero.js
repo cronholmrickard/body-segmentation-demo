@@ -8,15 +8,15 @@ const Hero = () => {
   const [stream, setStream] = useState(null);
   const [error, setError] = useState(null);
 
-  // This is the active segmenter that is running the segmentation loop.
+  // Active segmentation instance (runs the segmentation loop)
   const [segmenterInstance, setSegmenterInstance] = useState(null);
-  // Preloaded segmenter with model loaded, ready to be activated.
+  // Preloaded segmentation instance with model loaded (ready for activation)
   const [preloadedSegmenter, setPreloadedSegmenter] = useState(null);
 
   // Track whether the background effect is active.
   const [bgActive, setBgActive] = useState(false);
 
-  // Refs for cleanup so that our cleanup effect doesn't run on every state change.
+  // Refs for cleanup.
   const streamRef = useRef(null);
   const segmenterInstanceRef = useRef(null);
 
@@ -27,9 +27,9 @@ const Hero = () => {
     segmenterInstanceRef.current = segmenterInstance;
   }, [segmenterInstance]);
 
-  // -------------------------------------
+  // -----------------------------
   // 1) Start the camera and preload model
-  // -------------------------------------
+  // -----------------------------
   const startCamera = async () => {
     try {
       const constraints = {
@@ -47,7 +47,6 @@ const Hero = () => {
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
         videoRef.current.muted = true;
-        // Wait for video metadata to load, then play.
         await new Promise((resolve) => {
           videoRef.current.onloadedmetadata = () => {
             videoRef.current
@@ -60,7 +59,7 @@ const Hero = () => {
           };
         });
 
-        // Preload the segmentation model if not already loaded.
+        // Preload segmentation model if not already preloaded.
         if (!preloadedSegmenter) {
           const tempSegmenter = new BodySegmenter(
             videoRef.current,
@@ -90,27 +89,39 @@ const Hero = () => {
       streamRef.current.getTracks().forEach((track) => track.stop());
       setStream(null);
     }
+    // Turn off background effect.
     setBgActive(false);
-    // Stop the active segmenter (if any) but keep the preloaded one.
+    // Stop active segmentation, if any.
     if (segmenterInstanceRef.current) {
       segmenterInstanceRef.current.stop();
       setSegmenterInstance(null);
     }
   };
 
-  // -------------------------------------
+  // -----------------------------
   // 3) Activate background effect
-  // -------------------------------------
+  // -----------------------------
   const handleBackgroundButtonClick = () => {
-    // Only activate if there's an active stream.
     if (stream) {
       setBgActive(true);
     }
   };
 
-  // -------------------------------------
-  // 4) Initialize (or activate) BodySegmenter when bgActive becomes true.
-  // -------------------------------------
+  // -----------------------------
+  // 4) Deactivate background effect
+  // -----------------------------
+  const handleStopBackgroundClick = () => {
+    // Stop the active segmentation loop and hide the canvas.
+    if (segmenterInstanceRef.current) {
+      segmenterInstanceRef.current.stop();
+      setSegmenterInstance(null);
+    }
+    setBgActive(false);
+  };
+
+  // -----------------------------
+  // 5) Activate (or initialize) BodySegmenter when bgActive becomes true.
+  // -----------------------------
   useEffect(() => {
     if (
       bgActive &&
@@ -118,13 +129,11 @@ const Hero = () => {
       canvasRef.current &&
       !segmenterInstance
     ) {
-      // If we already preloaded a segmenter, use it.
       if (preloadedSegmenter) {
         setSegmenterInstance(preloadedSegmenter);
-        preloadedSegmenter.start(); // Start its segmentation loop.
+        preloadedSegmenter.start();
         console.log('Activated preloaded segmentation model.');
       } else {
-        // Fallback: load the model if it wasn't preloaded.
         const initializeSegmenter = async () => {
           const instance = new BodySegmenter(
             videoRef.current,
@@ -144,9 +153,9 @@ const Hero = () => {
     }
   }, [bgActive, segmenterInstance, preloadedSegmenter]);
 
-  // -------------------------------------
-  // 5) Cleanup on unmount only.
-  // -------------------------------------
+  // -----------------------------
+  // 6) Cleanup on unmount only.
+  // -----------------------------
   useEffect(() => {
     return () => {
       if (segmenterInstanceRef.current) {
@@ -158,9 +167,9 @@ const Hero = () => {
     };
   }, []);
 
-  // -------------------------------------
+  // -----------------------------
   // RENDER
-  // -------------------------------------
+  // -----------------------------
   return (
     <div style={{ textAlign: 'center' }}>
       <h1>Body Segmentation Demo</h1>
@@ -172,7 +181,7 @@ const Hero = () => {
           alignItems: 'start',
         }}
       >
-        {/* Control buttons */}
+        {/* Left-side controls */}
         <div
           style={{
             display: 'flex',
@@ -186,7 +195,7 @@ const Hero = () => {
           <button onClick={stopCamera}>Stop Camera</button>
         </div>
 
-        {/* Fixed-size container for video + canvas */}
+        {/* Video and canvas container */}
         <div style={{ position: 'relative', width: '640px', height: '480px' }}>
           <video
             ref={videoRef}
@@ -200,8 +209,7 @@ const Hero = () => {
               width: '640px',
               height: '480px',
               background: '#333',
-              // Mirror the video so that it appears as a mirror reflection.
-              transform: 'scaleX(-1)',
+              transform: 'scaleX(-1)', // Mirror effect
             }}
           />
           <canvas
@@ -213,13 +221,12 @@ const Hero = () => {
               width: '640px',
               height: '480px',
               display: bgActive ? 'block' : 'none',
-              // Mirror the canvas so that it appears as a mirror reflection.
-              transform: 'scaleX(-1)',
+              transform: 'scaleX(-1)', // Mirror effect
             }}
           />
         </div>
 
-        {/* Background button is always shown, but disabled if there's no stream or if bgActive is already true */}
+        {/* Right-side controls */}
         <div
           style={{
             marginLeft: '20px',
@@ -231,8 +238,12 @@ const Hero = () => {
           <button
             onClick={handleBackgroundButtonClick}
             disabled={!stream || bgActive}
+            style={{ marginBottom: '10px' }}
           >
-            Background
+            Start Blur Effect
+          </button>
+          <button onClick={handleStopBackgroundClick} disabled={!bgActive}>
+            Stop Blur Effect
           </button>
         </div>
       </div>
