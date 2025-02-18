@@ -49,5 +49,6 @@
   "license": "ISC",
   "bugs": {
     "url": "https://github.com/cronholmrickard/body-segmentation-demo/issues"
-  }
+  },
+  "homepage": "https://cronholmrickard.github.io/body-segmentation-demo"
 }
