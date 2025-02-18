@@ -10,11 +10,16 @@ const Hero = () => {
 
   // Active segmentation instance (runs the segmentation loop)
   const [segmenterInstance, setSegmenterInstance] = useState(null);
-  // Preloaded segmentation instance with model loaded (ready for activation)
+  // Preloaded segmentation instance with model loaded, ready for activation.
   const [preloadedSegmenter, setPreloadedSegmenter] = useState(null);
 
-  // Track whether the background effect is active.
-  const [bgActive, setBgActive] = useState(false);
+  /**
+   * effectType: "none" | "blur" | "static"
+   * "none": No background effect.
+   * "blur": Apply blurred background (bokeh).
+   * "static": Composite a static background image.
+   */
+  const [effectType, setEffectType] = useState('none');
 
   // Refs for cleanup.
   const streamRef = useRef(null);
@@ -27,9 +32,9 @@ const Hero = () => {
     segmenterInstanceRef.current = segmenterInstance;
   }, [segmenterInstance]);
 
-  // -----------------------------
+  // -------------------------------------
   // 1) Start the camera and preload model
-  // -----------------------------
+  // -------------------------------------
   const startCamera = async () => {
     try {
       const constraints = {
@@ -46,7 +51,7 @@ const Hero = () => {
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
-        videoRef.current.muted = true;
+        videoRef.current.muted = true; // Required for autoplay
         await new Promise((resolve) => {
           videoRef.current.onloadedmetadata = () => {
             videoRef.current
@@ -81,59 +86,73 @@ const Hero = () => {
     }
   };
 
-  // -----------------------------
+  // -------------------------------------
   // 2) Stop the camera and segmentation
-  // -----------------------------
+  // -------------------------------------
   const stopCamera = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       setStream(null);
     }
-    // Turn off background effect.
-    setBgActive(false);
-    // Stop active segmentation, if any.
+    // Reset effectType to "none" and stop active segmentation.
+    setEffectType('none');
     if (segmenterInstanceRef.current) {
       segmenterInstanceRef.current.stop();
       setSegmenterInstance(null);
     }
   };
 
-  // -----------------------------
-  // 3) Activate background effect
-  // -----------------------------
-  const handleBackgroundButtonClick = () => {
+  // -------------------------------------
+  // 3) Activate blur background effect.
+  // -------------------------------------
+  const handleStartBlur = () => {
     if (stream) {
-      setBgActive(true);
+      setEffectType('blur');
     }
   };
 
-  // -----------------------------
-  // 4) Deactivate background effect
-  // -----------------------------
-  const handleStopBackgroundClick = () => {
-    // Stop the active segmentation loop and hide the canvas.
+  // -------------------------------------
+  // 4) Activate static background effect.
+  // -------------------------------------
+  const handleStartStatic = () => {
+    if (stream) {
+      setEffectType('static');
+    }
+  };
+
+  // -------------------------------------
+  // 5) Stop any background effect.
+  // -------------------------------------
+  const handleStopEffect = () => {
+    setEffectType('none');
     if (segmenterInstanceRef.current) {
       segmenterInstanceRef.current.stop();
       setSegmenterInstance(null);
     }
-    setBgActive(false);
   };
 
-  // -----------------------------
-  // 5) Activate (or initialize) BodySegmenter when bgActive becomes true.
-  // -----------------------------
+  // -------------------------------------
+  // 6) Initialize (or activate) BodySegmenter when effectType is not "none".
+  // -------------------------------------
   useEffect(() => {
     if (
-      bgActive &&
+      effectType !== 'none' &&
       videoRef.current &&
       canvasRef.current &&
       !segmenterInstance
     ) {
+      // Activate the preloaded segmenter if available.
       if (preloadedSegmenter) {
         setSegmenterInstance(preloadedSegmenter);
-        preloadedSegmenter.start();
-        console.log('Activated preloaded segmentation model.');
+        // Tell the segmenter which effect to apply.
+        preloadedSegmenter.setEffectType(effectType);
+        preloadedSegmenter.start(); // starts its internal loop (_tick)
+        console.log(
+          'Activated preloaded segmentation model with effect:',
+          effectType,
+        );
       } else {
+        // Fallback: initialize a new segmenter.
         const initializeSegmenter = async () => {
           const instance = new BodySegmenter(
             videoRef.current,
@@ -146,16 +165,26 @@ const Hero = () => {
             return;
           }
           setSegmenterInstance(instance);
+          instance.setEffectType(effectType);
           instance.start();
         };
         initializeSegmenter();
       }
     }
-  }, [bgActive, segmenterInstance, preloadedSegmenter]);
+  }, [effectType, segmenterInstance, preloadedSegmenter]);
 
-  // -----------------------------
-  // 6) Cleanup on unmount only.
-  // -----------------------------
+  // -------------------------------------
+  // 7) Update active segmenter's effect type when effectType changes.
+  // -------------------------------------
+  useEffect(() => {
+    if (segmenterInstance) {
+      segmenterInstance.setEffectType(effectType);
+    }
+  }, [effectType, segmenterInstance]);
+
+  // -------------------------------------
+  // 8) Cleanup on unmount only.
+  // -------------------------------------
   useEffect(() => {
     return () => {
       if (segmenterInstanceRef.current) {
@@ -167,9 +196,9 @@ const Hero = () => {
     };
   }, []);
 
-  // -----------------------------
+  // -------------------------------------
   // RENDER
-  // -----------------------------
+  // -------------------------------------
   return (
     <div style={{ textAlign: 'center' }}>
       <h1>Body Segmentation Demo</h1>
@@ -209,7 +238,7 @@ const Hero = () => {
               width: '640px',
               height: '480px',
               background: '#333',
-              transform: 'scaleX(-1)', // Mirror effect
+              transform: 'scaleX(-1)', // Mirror effect.
             }}
           />
           <canvas
@@ -220,8 +249,8 @@ const Hero = () => {
               left: 0,
               width: '640px',
               height: '480px',
-              display: bgActive ? 'block' : 'none',
-              transform: 'scaleX(-1)', // Mirror effect
+              display: effectType !== 'none' ? 'block' : 'none',
+              transform: 'scaleX(-1)', // Mirror effect.
             }}
           />
         </div>
@@ -236,14 +265,21 @@ const Hero = () => {
           }}
         >
           <button
-            onClick={handleBackgroundButtonClick}
-            disabled={!stream || bgActive}
+            onClick={handleStartBlur}
+            disabled={!stream || effectType !== 'none'}
             style={{ marginBottom: '10px' }}
           >
-            Start Blur Effect
+            Start Blur Background
           </button>
-          <button onClick={handleStopBackgroundClick} disabled={!bgActive}>
-            Stop Blur Effect
+          <button
+            onClick={handleStartStatic}
+            disabled={!stream || effectType !== 'none'}
+            style={{ marginBottom: '10px' }}
+          >
+            Start Static Background
+          </button>
+          <button onClick={handleStopEffect} disabled={effectType === 'none'}>
+            Stop Background Effect
           </button>
         </div>
       </div>
