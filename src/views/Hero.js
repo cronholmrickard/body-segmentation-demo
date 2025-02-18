@@ -77,6 +77,7 @@ const Hero = () => {
     setBgActive(false);
     if (segmenterInstanceRef.current) {
       segmenterInstanceRef.current.stop();
+      setSegmenterInstance(null);
     }
   };
 
