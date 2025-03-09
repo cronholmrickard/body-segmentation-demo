@@ -1,57 +1,48 @@
+// Hero.jsx
 import React, { useRef, useState, useEffect } from 'react';
-import BodySegmenter from '../lib/BodySegmenter';
+import BodySegmenter from '../lib/BodySegmenter'; // if you have one
+import TaskVisionSegmenter from '../lib/TaskVisionSegmenter';
+import WebGLSegmenterRenderer from '../lib/WebGLSegmenterRenderer';
 
 const Hero = () => {
   const videoRef = useRef(null);
+  // canvasRef is used as the offscreen mask canvas for TaskVisionSegmenter.
   const canvasRef = useRef(null);
+  // glCanvasRef is used for the WebGL output.
+  const glCanvasRef = useRef(null);
 
   const [stream, setStream] = useState(null);
   const [error, setError] = useState(null);
-
-  // Active segmentation instance (runs the segmentation loop)
   const [segmenterInstance, setSegmenterInstance] = useState(null);
-  // Preloaded segmentation instance with model loaded, ready for activation.
   const [preloadedSegmenter, setPreloadedSegmenter] = useState(null);
-
-  /**
-   * effectType: "none" | "blur" | "static"
-   * "none": No background effect.
-   * "blur": Apply blurred background (bokeh).
-   * "static": Composite a static background image.
-   */
+  // Toggle state: true = use BodySegmenter, false = use TaskVisionSegmenter.
+  const [useBodySegmenter, setUseBodySegmenter] = useState(true);
+  // effectType: "none" | "blur" | "static"
   const [effectType, setEffectType] = useState('none');
 
   // Refs for cleanup.
-  const streamRef = useRef(null);
+  const streamRefLocal = useRef(null);
   const segmenterInstanceRef = useRef(null);
-
   useEffect(() => {
-    streamRef.current = stream;
+    streamRefLocal.current = stream;
   }, [stream]);
   useEffect(() => {
     segmenterInstanceRef.current = segmenterInstance;
   }, [segmenterInstance]);
 
-  // -------------------------------------
-  // 1) Start the camera and preload model
-  // -------------------------------------
+  // 1) Start camera and preload model.
   const startCamera = async () => {
     try {
       const constraints = {
-        video: {
-          width: { ideal: 640 },
-          height: { ideal: 480 },
-        },
+        video: { width: { ideal: 640 }, height: { ideal: 480 } },
       };
-
       const mediaStream = await navigator.mediaDevices.getUserMedia(
         constraints,
       );
       setStream(mediaStream);
-
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
-        videoRef.current.muted = true; // Required for autoplay
+        videoRef.current.muted = true;
         await new Promise((resolve) => {
           videoRef.current.onloadedmetadata = () => {
             videoRef.current
@@ -63,10 +54,12 @@ const Hero = () => {
               });
           };
         });
-
-        // Preload segmentation model if not already preloaded.
         if (!preloadedSegmenter) {
-          const tempSegmenter = new BodySegmenter(
+          // For TaskVisionSegmenter, pass canvasRef as the mask canvas.
+          const SegmenterClass = useBodySegmenter
+            ? BodySegmenter
+            : TaskVisionSegmenter;
+          const tempSegmenter = new SegmenterClass(
             videoRef.current,
             canvasRef.current,
           );
@@ -86,15 +79,12 @@ const Hero = () => {
     }
   };
 
-  // -------------------------------------
-  // 2) Stop the camera and segmentation
-  // -------------------------------------
+  // 2) Stop camera and segmentation.
   const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
+    if (streamRefLocal.current) {
+      streamRefLocal.current.getTracks().forEach((track) => track.stop());
       setStream(null);
     }
-    // Reset effectType to "none" and stop active segmentation.
     setEffectType('none');
     if (segmenterInstanceRef.current) {
       segmenterInstanceRef.current.stop();
@@ -102,27 +92,13 @@ const Hero = () => {
     }
   };
 
-  // -------------------------------------
-  // 3) Activate blur background effect.
-  // -------------------------------------
+  // 3) Activate effects.
   const handleStartBlur = () => {
-    if (stream) {
-      setEffectType('blur');
-    }
+    if (stream) setEffectType('blur');
   };
-
-  // -------------------------------------
-  // 4) Activate static background effect.
-  // -------------------------------------
   const handleStartStatic = () => {
-    if (stream) {
-      setEffectType('static');
-    }
+    if (stream) setEffectType('static');
   };
-
-  // -------------------------------------
-  // 5) Stop any background effect.
-  // -------------------------------------
   const handleStopEffect = () => {
     setEffectType('none');
     if (segmenterInstanceRef.current) {
@@ -131,30 +107,35 @@ const Hero = () => {
     }
   };
 
-  // -------------------------------------
-  // 6) Initialize (or activate) BodySegmenter when effectType is not "none".
-  // -------------------------------------
+  // 4) Toggle segmentation type.
+  const handleToggleSegmenter = (e) => {
+    const newValue = e.target.checked;
+    if (effectType !== 'none') {
+      handleStopEffect();
+    }
+    setPreloadedSegmenter(null);
+    setUseBodySegmenter(newValue);
+  };
+
+  // 5) Initialize (or activate) segmentation.
   useEffect(() => {
-    if (
-      effectType !== 'none' &&
-      videoRef.current &&
-      canvasRef.current &&
-      !segmenterInstance
-    ) {
-      // Activate the preloaded segmenter if available.
+    if (effectType !== 'none' && videoRef.current) {
       if (preloadedSegmenter) {
         setSegmenterInstance(preloadedSegmenter);
-        // Tell the segmenter which effect to apply.
         preloadedSegmenter.setEffectType(effectType);
-        preloadedSegmenter.start(); // starts its internal loop (_tick)
+        preloadedSegmenter.start();
         console.log(
-          'Activated preloaded segmentation model with effect:',
+          `Activated preloaded segmentation model (${
+            useBodySegmenter ? 'BodySegmenter' : 'TaskVisionSegmenter'
+          }) with effect:`,
           effectType,
         );
       } else {
-        // Fallback: initialize a new segmenter.
         const initializeSegmenter = async () => {
-          const instance = new BodySegmenter(
+          const SegmenterClass = useBodySegmenter
+            ? BodySegmenter
+            : TaskVisionSegmenter;
+          const instance = new SegmenterClass(
             videoRef.current,
             canvasRef.current,
           );
@@ -171,38 +152,77 @@ const Hero = () => {
         initializeSegmenter();
       }
     }
-  }, [effectType, segmenterInstance, preloadedSegmenter]);
+  }, [effectType, preloadedSegmenter, useBodySegmenter]);
 
-  // -------------------------------------
-  // 7) Update active segmenter's effect type when effectType changes.
-  // -------------------------------------
+  // 6) Update effect type on active segmenter.
   useEffect(() => {
     if (segmenterInstance) {
       segmenterInstance.setEffectType(effectType);
     }
   }, [effectType, segmenterInstance]);
 
-  // -------------------------------------
-  // 8) Cleanup on unmount only.
-  // -------------------------------------
+  // 7) GL compositing loop for both segmentation types.
+  useEffect(() => {
+    let glAnimationFrame;
+    if (effectType !== 'none' && segmenterInstance && glCanvasRef.current) {
+      // Create a background image element.
+      const backgroundImg = new Image();
+      backgroundImg.crossOrigin = 'anonymous';
+      backgroundImg.src = process.env.PUBLIC_URL
+        ? process.env.PUBLIC_URL + '/background.png'
+        : '/background.png';
+      backgroundImg.onload = () => {
+        // Set output canvas dimensions.
+        glCanvasRef.current.width = videoRef.current.videoWidth;
+        glCanvasRef.current.height = videoRef.current.videoHeight;
+        // Create the GL renderer using the video, background, and mask (canvasRef).
+        const renderer = new WebGLSegmenterRenderer(
+          videoRef.current,
+          backgroundImg,
+          canvasRef.current,
+          glCanvasRef.current,
+        );
+        const glRenderLoop = () => {
+          renderer.render();
+          glAnimationFrame = requestAnimationFrame(glRenderLoop);
+        };
+        glRenderLoop();
+      };
+      backgroundImg.onerror = () => {
+        console.error('Error loading background image.');
+      };
+    }
+    return () => {
+      if (glAnimationFrame) cancelAnimationFrame(glAnimationFrame);
+    };
+  }, [effectType, segmenterInstance]);
+
+  // 8) Cleanup on unmount.
   useEffect(() => {
     return () => {
       if (segmenterInstanceRef.current) {
         segmenterInstanceRef.current.stop();
       }
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((track) => track.stop());
+      if (streamRefLocal.current) {
+        streamRefLocal.current.getTracks().forEach((track) => track.stop());
       }
     };
   }, []);
 
-  // -------------------------------------
-  // RENDER
-  // -------------------------------------
   return (
     <div style={{ textAlign: 'center' }}>
-      <h1>Body Segmentation Demo</h1>
+      <h1>Segmentation Demo</h1>
       {error && <p style={{ color: 'red' }}>{error}</p>}
+      <div style={{ marginBottom: '10px' }}>
+        <label>
+          <input
+            type='checkbox'
+            checked={useBodySegmenter}
+            onChange={handleToggleSegmenter}
+          />
+          Use BodySegmenter (checked) / TaskVisionSegmenter (unchecked)
+        </label>
+      </div>
       <div
         style={{
           display: 'flex',
@@ -210,7 +230,6 @@ const Hero = () => {
           alignItems: 'start',
         }}
       >
-        {/* Left-side controls */}
         <div
           style={{
             display: 'flex',
@@ -223,8 +242,6 @@ const Hero = () => {
           </button>
           <button onClick={stopCamera}>Stop Camera</button>
         </div>
-
-        {/* Video and canvas container */}
         <div style={{ position: 'relative', width: '640px', height: '480px' }}>
           <video
             ref={videoRef}
@@ -238,11 +255,19 @@ const Hero = () => {
               width: '640px',
               height: '480px',
               background: '#333',
-              transform: 'scaleX(-1)', // Mirror effect.
+              transform: 'scaleX(-1)',
             }}
           />
+          {/* Hide the offscreen mask canvas */}
           <canvas
             ref={canvasRef}
+            style={{
+              display: 'none',
+            }}
+          />
+          {/* Always show the GL output for compositing */}
+          <canvas
+            ref={glCanvasRef}
             style={{
               position: 'absolute',
               top: 0,
@@ -250,12 +275,10 @@ const Hero = () => {
               width: '640px',
               height: '480px',
               display: effectType !== 'none' ? 'block' : 'none',
-              transform: 'scaleX(-1)', // Mirror effect.
+              transform: 'scaleX(-1)',
             }}
           />
         </div>
-
-        {/* Right-side controls */}
         <div
           style={{
             marginLeft: '20px',
