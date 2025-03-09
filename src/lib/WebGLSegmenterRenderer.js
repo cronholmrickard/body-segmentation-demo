@@ -3,8 +3,8 @@ export default class WebGLSegmenterRenderer {
   /**
    * @param {HTMLVideoElement} video - The live video feed.
    * @param {HTMLImageElement|HTMLCanvasElement} backgroundSource - The static background image.
-   * @param {HTMLCanvasElement} maskSource - Canvas holding the binary segmentation mask.
-   * @param {HTMLCanvasElement} outputCanvas - Canvas where the composite is rendered.
+   * @param {HTMLCanvasElement} maskSource - The offscreen canvas containing the binary mask.
+   * @param {HTMLCanvasElement} outputCanvas - The canvas where the composite is rendered.
    */
   constructor(video, backgroundSource, maskSource, outputCanvas) {
     this.video = video;
@@ -23,7 +23,7 @@ export default class WebGLSegmenterRenderer {
     const gl = this.gl;
     gl.clearColor(0.0, 0.0, 0.0, 0.0);
 
-    // Vertex shader for a full-screen quad.
+    // Vertex shader: a full-screen quad.
     const vsSource = `
       attribute vec2 a_position;
       attribute vec2 a_texCoord;
@@ -33,7 +33,7 @@ export default class WebGLSegmenterRenderer {
         v_texCoord = a_texCoord;
       }
     `;
-    // Fragment shader: composite video and background using mask alpha.
+    // Fragment shader: composite video and background based on the mask alpha.
     const fsSource = `
       precision mediump float;
       varying vec2 v_texCoord;
@@ -44,6 +44,7 @@ export default class WebGLSegmenterRenderer {
         vec4 videoColor = texture2D(u_video, v_texCoord);
         float maskAlpha = texture2D(u_mask, v_texCoord).a;
         vec4 bgColor = texture2D(u_background, v_texCoord);
+        // Where maskAlpha is 1.0, show video; where 0.0, show background.
         gl_FragColor = mix(bgColor, videoColor, maskAlpha);
       }
     `;
@@ -120,7 +121,7 @@ export default class WebGLSegmenterRenderer {
     const gl = this.gl;
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    // Set up texture parameters once.
+    // Set texture parameters.
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -128,14 +129,12 @@ export default class WebGLSegmenterRenderer {
   }
 
   /**
-   * Update texture with new source data.
-   * Here we use texImage2D to allocate storage each frame (ensuring correct dimensions)
-   * rather than texSubImage2D.
+   * Updates the texture by allocating storage each frame.
    */
   _updateTexture(texture, source) {
     const gl = this.gl;
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    // gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    // We don't flip the Y-axis here—assume sources are already oriented correctly.
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
   }
 
@@ -144,7 +143,7 @@ export default class WebGLSegmenterRenderer {
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
-    // Update textures with the current content.
+    // Update textures with current data.
     this._updateTexture(this.videoTexture, this.video);
     this._updateTexture(this.maskTexture, this.maskSource);
     this._updateTexture(this.backgroundTexture, this.backgroundSource);

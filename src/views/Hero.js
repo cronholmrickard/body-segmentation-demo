@@ -1,21 +1,21 @@
 // Hero.jsx
 import React, { useRef, useState, useEffect } from 'react';
-import BodySegmenter from '../lib/BodySegmenter'; // if you have one
+import BodySegmenter from '../lib/BodySegmenter';
 import TaskVisionSegmenter from '../lib/TaskVisionSegmenter';
 import WebGLSegmenterRenderer from '../lib/WebGLSegmenterRenderer';
 
 const Hero = () => {
   const videoRef = useRef(null);
-  // canvasRef is used as the offscreen mask canvas for TaskVisionSegmenter.
+  // canvasRef is the offscreen mask canvas used by both segmentation classes.
   const canvasRef = useRef(null);
-  // glCanvasRef is used for the WebGL output.
+  // glCanvasRef is where the final GL composite is rendered.
   const glCanvasRef = useRef(null);
 
   const [stream, setStream] = useState(null);
   const [error, setError] = useState(null);
   const [segmenterInstance, setSegmenterInstance] = useState(null);
   const [preloadedSegmenter, setPreloadedSegmenter] = useState(null);
-  // Toggle state: true = use BodySegmenter, false = use TaskVisionSegmenter.
+  // Toggle: true = use BodySegmenter, false = use TaskVisionSegmenter.
   const [useBodySegmenter, setUseBodySegmenter] = useState(true);
   // effectType: "none" | "blur" | "static"
   const [effectType, setEffectType] = useState('none');
@@ -29,6 +29,23 @@ const Hero = () => {
   useEffect(() => {
     segmenterInstanceRef.current = segmenterInstance;
   }, [segmenterInstance]);
+
+  // Cache the background image in a ref so it's loaded only once.
+  const backgroundImgRef = useRef(null);
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = process.env.PUBLIC_URL
+      ? process.env.PUBLIC_URL + '/background.png'
+      : '/background.png';
+    img.onload = () => {
+      console.log('Background image loaded:', img.width, img.height);
+      backgroundImgRef.current = img;
+    };
+    img.onerror = () => {
+      console.error('Error loading background image.');
+    };
+  }, []);
 
   // 1) Start camera and preload model.
   const startCamera = async () => {
@@ -55,7 +72,6 @@ const Hero = () => {
           };
         });
         if (!preloadedSegmenter) {
-          // For TaskVisionSegmenter, pass canvasRef as the mask canvas.
           const SegmenterClass = useBodySegmenter
             ? BodySegmenter
             : TaskVisionSegmenter;
@@ -161,36 +177,28 @@ const Hero = () => {
     }
   }, [effectType, segmenterInstance]);
 
-  // 7) GL compositing loop for both segmentation types.
+  // 7) GL compositing loop (central composition for both segmentation classes).
   useEffect(() => {
     let glAnimationFrame;
-    if (effectType !== 'none' && segmenterInstance && glCanvasRef.current) {
-      // Create a background image element.
-      const backgroundImg = new Image();
-      backgroundImg.crossOrigin = 'anonymous';
-      backgroundImg.src = process.env.PUBLIC_URL
-        ? process.env.PUBLIC_URL + '/background.png'
-        : '/background.png';
-      backgroundImg.onload = () => {
-        // Set output canvas dimensions.
-        glCanvasRef.current.width = videoRef.current.videoWidth;
-        glCanvasRef.current.height = videoRef.current.videoHeight;
-        // Create the GL renderer using the video, background, and mask (canvasRef).
-        const renderer = new WebGLSegmenterRenderer(
-          videoRef.current,
-          backgroundImg,
-          canvasRef.current,
-          glCanvasRef.current,
-        );
-        const glRenderLoop = () => {
-          renderer.render();
-          glAnimationFrame = requestAnimationFrame(glRenderLoop);
-        };
-        glRenderLoop();
+    if (
+      effectType !== 'none' &&
+      segmenterInstance &&
+      glCanvasRef.current &&
+      backgroundImgRef.current
+    ) {
+      glCanvasRef.current.width = videoRef.current.videoWidth;
+      glCanvasRef.current.height = videoRef.current.videoHeight;
+      const renderer = new WebGLSegmenterRenderer(
+        videoRef.current,
+        backgroundImgRef.current,
+        canvasRef.current,
+        glCanvasRef.current,
+      );
+      const glRenderLoop = () => {
+        renderer.render();
+        glAnimationFrame = requestAnimationFrame(glRenderLoop);
       };
-      backgroundImg.onerror = () => {
-        console.error('Error loading background image.');
-      };
+      glRenderLoop();
     }
     return () => {
       if (glAnimationFrame) cancelAnimationFrame(glAnimationFrame);
@@ -258,14 +266,9 @@ const Hero = () => {
               transform: 'scaleX(-1)',
             }}
           />
-          {/* Hide the offscreen mask canvas */}
-          <canvas
-            ref={canvasRef}
-            style={{
-              display: 'none',
-            }}
-          />
-          {/* Always show the GL output for compositing */}
+          {/* The offscreen mask canvas (used for composition) is hidden */}
+          <canvas ref={canvasRef} style={{ display: 'none' }} />
+          {/* GL output canvas */}
           <canvas
             ref={glCanvasRef}
             style={{
@@ -285,6 +288,7 @@ const Hero = () => {
             display: 'flex',
             flexDirection: 'column',
             justifyContent: 'center',
+            alignItems: 'start',
           }}
         >
           <button
