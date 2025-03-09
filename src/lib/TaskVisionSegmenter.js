@@ -19,11 +19,13 @@ export default class TaskVisionSegmenter {
     this.segmenter = null;
     // Cache the previous ImageData to reuse if dimensions match.
     this.cachedMaskImageData = null;
-    // Minimum delay between segmentation requests in ms.
-    this.minSegmentationDelay = 100; // adjust for desired frequency
+    // Minimum delay (in ms) between segmentation requests.
+    this.minSegmentationDelay = 100;
     this.lastSegmentationTime = 0;
-    // Flag to ensure only one segmentation request is in flight.
+    // Flag for whether a segmentation request is in flight.
     this.segmentationInFlight = false;
+    // Cache for the mask array to avoid reallocating every frame.
+    this.cachedMaskArray = null;
   }
 
   async loadModel() {
@@ -34,7 +36,7 @@ export default class TaskVisionSegmenter {
       this.segmenter = await ImageSegmenter.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath:
-            'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+            'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter_landscape/float16/latest/selfie_segmenter_landscape.tflite',
           delegate: 'CPU',
         },
         runningMode: 'VIDEO',
@@ -57,7 +59,7 @@ export default class TaskVisionSegmenter {
       return;
     }
     this.running = true;
-    this.lastSegmentationTime = 0;
+    this.lastSegmentationTime = performance.now();
     this._tick();
   }
 
@@ -70,19 +72,19 @@ export default class TaskVisionSegmenter {
     const video = this.video;
     const maskCanvas = this.maskCanvas;
     const ctx = this.ctx;
-    // Ensure the mask canvas matches video dimensions.
+    // Update mask canvas dimensions to match the video.
     maskCanvas.width = video.videoWidth;
     maskCanvas.height = video.videoHeight;
 
-    // Always draw the cached mask so the compositor has a stable mask.
+    // Always render the current cached mask so the display stays stable.
     if (this.cachedMaskImageData) {
       ctx.putImageData(this.cachedMaskImageData, 0, 0);
     } else {
       ctx.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
     }
 
-    // Check if enough time has elapsed before launching a new segmentation request.
     const now = performance.now();
+    // Only start a new segmentation if enough time has elapsed and none is in flight.
     if (
       !this.segmentationInFlight &&
       now - this.lastSegmentationTime >= this.minSegmentationDelay
@@ -99,17 +101,35 @@ export default class TaskVisionSegmenter {
           const width = categoryMask.width;
           const height = categoryMask.height;
           const maskData = categoryMask.getAsUint8Array();
+
+          // Reuse cached mask array if possible.
+          if (
+            !this.cachedMaskArray ||
+            this.cachedMaskArray.length !== maskData.length
+          ) {
+            this.cachedMaskArray = new Uint8ClampedArray(maskData.length);
+          }
+          // Fill a new ImageData using the cached mask array.
           const newImageData = ctx.createImageData(width, height);
           for (let i = 0; i < maskData.length; i++) {
-            // Invert: if maskData[i] > 0 then background (alpha 0), else foreground (alpha 255).
+            // Invert: if maskData[i] > 0, background (alpha 0), else foreground (alpha 255).
             const newAlpha = maskData[i] > 0 ? 0 : 255;
             newImageData.data[i * 4] = 255;
             newImageData.data[i * 4 + 1] = 255;
             newImageData.data[i * 4 + 2] = 255;
             newImageData.data[i * 4 + 3] = newAlpha;
+            this.cachedMaskArray[i * 4 + 3] = newAlpha;
           }
-          // Update cached mask (replace it completely).
-          this.cachedMaskImageData = newImageData;
+          // Instead of allocating a new ImageData each time, update cachedMaskImageData if dimensions match.
+          if (
+            this.cachedMaskImageData &&
+            this.cachedMaskImageData.width === width &&
+            this.cachedMaskImageData.height === height
+          ) {
+            this.cachedMaskImageData.data.set(newImageData.data);
+          } else {
+            this.cachedMaskImageData = newImageData;
+          }
           ctx.putImageData(this.cachedMaskImageData, 0, 0);
           categoryMask.close();
         }
@@ -118,6 +138,7 @@ export default class TaskVisionSegmenter {
       }
       this.segmentationInFlight = false;
     }
+
     requestAnimationFrame(() => this._tick());
   }
 }

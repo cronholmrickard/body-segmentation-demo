@@ -10,6 +10,8 @@ const Hero = () => {
   const canvasRef = useRef(null);
   // glCanvasRef is where the final GL composite is rendered.
   const glCanvasRef = useRef(null);
+  // blurCanvasRef is an offscreen canvas for continuously updated blurred video.
+  const blurCanvasRef = useRef(null);
 
   const [stream, setStream] = useState(null);
   const [error, setError] = useState(null);
@@ -30,7 +32,7 @@ const Hero = () => {
     segmenterInstanceRef.current = segmenterInstance;
   }, [segmenterInstance]);
 
-  // Cache the background image in a ref so it's loaded only once.
+  // Cache the static background image.
   const backgroundImgRef = useRef(null);
   useEffect(() => {
     const img = new Image();
@@ -39,15 +41,47 @@ const Hero = () => {
       ? process.env.PUBLIC_URL + '/background.png'
       : '/background.png';
     img.onload = () => {
-      console.log('Background image loaded:', img.width, img.height);
+      console.log('Static background image loaded:', img.width, img.height);
       backgroundImgRef.current = img;
     };
     img.onerror = () => {
-      console.error('Error loading background image.');
+      console.error('Error loading static background image.');
     };
   }, []);
 
-  // 1) Start camera and preload model.
+  // Create the blur canvas once.
+  useEffect(() => {
+    const blurCanvas = document.createElement('canvas');
+    blurCanvasRef.current = blurCanvas;
+  }, []);
+
+  // Continuously update the blur canvas when effectType is "blur".
+  useEffect(() => {
+    let animationFrame;
+    if (effectType === 'blur' && videoRef.current && blurCanvasRef.current) {
+      const updateBlur = () => {
+        const blurCanvas = blurCanvasRef.current;
+        blurCanvas.width = videoRef.current.videoWidth;
+        blurCanvas.height = videoRef.current.videoHeight;
+        const ctx = blurCanvas.getContext('2d');
+        ctx.filter = 'blur(12px)';
+        ctx.drawImage(
+          videoRef.current,
+          0,
+          0,
+          blurCanvas.width,
+          blurCanvas.height,
+        );
+        animationFrame = requestAnimationFrame(updateBlur);
+      };
+      updateBlur();
+    }
+    return () => {
+      if (animationFrame) cancelAnimationFrame(animationFrame);
+    };
+  }, [effectType]);
+
+  // 1) Start camera and preload segmentation model.
   const startCamera = async () => {
     try {
       const constraints = {
@@ -108,7 +142,7 @@ const Hero = () => {
     }
   };
 
-  // 3) Activate effects.
+  // 3) Effect control.
   const handleStartBlur = () => {
     if (stream) setEffectType('blur');
   };
@@ -133,7 +167,7 @@ const Hero = () => {
     setUseBodySegmenter(newValue);
   };
 
-  // 5) Initialize (or activate) segmentation.
+  // 5) Initialize segmentation.
   useEffect(() => {
     if (effectType !== 'none' && videoRef.current) {
       if (preloadedSegmenter) {
@@ -177,28 +211,44 @@ const Hero = () => {
     }
   }, [effectType, segmenterInstance]);
 
-  // 7) GL compositing loop (central composition for both segmentation classes).
+  // 7) GL compositing loop (central composition).
   useEffect(() => {
     let glAnimationFrame;
     if (
       effectType !== 'none' &&
       segmenterInstance &&
       glCanvasRef.current &&
-      backgroundImgRef.current
+      videoRef.current
     ) {
+      // Set GL output canvas dimensions.
       glCanvasRef.current.width = videoRef.current.videoWidth;
       glCanvasRef.current.height = videoRef.current.videoHeight;
-      const renderer = new WebGLSegmenterRenderer(
-        videoRef.current,
-        backgroundImgRef.current,
-        canvasRef.current,
-        glCanvasRef.current,
-      );
-      const glRenderLoop = () => {
-        renderer.render();
-        glAnimationFrame = requestAnimationFrame(glRenderLoop);
-      };
-      glRenderLoop();
+
+      // Determine the background source based on effectType.
+      let backgroundSource = null;
+      if (effectType === 'static') {
+        if (backgroundImgRef.current) {
+          backgroundSource = backgroundImgRef.current;
+        }
+      } else if (effectType === 'blur') {
+        if (blurCanvasRef.current) {
+          backgroundSource = blurCanvasRef.current;
+        }
+      }
+
+      if (backgroundSource) {
+        const renderer = new WebGLSegmenterRenderer(
+          videoRef.current,
+          backgroundSource,
+          canvasRef.current, // offscreen mask canvas
+          glCanvasRef.current,
+        );
+        const glRenderLoop = () => {
+          renderer.render();
+          glAnimationFrame = requestAnimationFrame(glRenderLoop);
+        };
+        glRenderLoop();
+      }
     }
     return () => {
       if (glAnimationFrame) cancelAnimationFrame(glAnimationFrame);
@@ -266,7 +316,7 @@ const Hero = () => {
               transform: 'scaleX(-1)',
             }}
           />
-          {/* The offscreen mask canvas (used for composition) is hidden */}
+          {/* Offscreen mask canvas (hidden) */}
           <canvas ref={canvasRef} style={{ display: 'none' }} />
           {/* GL output canvas */}
           <canvas
